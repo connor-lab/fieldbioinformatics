@@ -1,6 +1,7 @@
 #Written by Nick Loman (@pathogenomenick)
 
 import os
+import shutil
 import sys
 from Bio import SeqIO
 from clint.textui import colored, puts, indent
@@ -12,6 +13,7 @@ def get_nanopolish_header(ref):
         raise SystemExit
 
     return  "%s:%d-%d" % (recs[0].id, 1, len(recs[0])+1)
+
 
 def run(parser, args):
     log = "%s.minion.log.txt" % (args.sample)
@@ -38,16 +40,18 @@ def run(parser, args):
         print(colored.red('Scheme BED file not found: ') + bed)
         raise SystemExit
 
+    shutil.copy2(ref, args.sample+ '.reference.fa')
+
     cmds = []
 
     nanopolish_header = get_nanopolish_header(ref)
 
     # 3) index the ref & align with bwa"
     if args.minimap2:
-        cmds.append("minimap2 -a -x map-ont -t %s %s %s | samtools view -bS - | samtools sort -o %s.sorted.bam -" % (args.threads, ref, read_file, args.sample))
+        cmds.append("minimap2 -a -x map-ont -t %s %s.reference.fa %s | samtools view -bS - | samtools sort -o %s.sorted.bam -" % (args.threads, args.sample, read_file, args.sample))
     else:
-        cmds.append("bwa index %s" % (ref,))
-        cmds.append("bwa mem -t %s -x ont2d %s %s | samtools view -bS - | samtools sort -o %s.sorted.bam -" % (args.threads, ref, read_file, args.sample))
+        cmds.append("bwa index %s.reference.fa" % (args.sample,))
+        cmds.append("bwa mem -t %s -x ont2d %s.reference.fa %s | samtools view -bS - | samtools sort -o %s.sorted.bam -" % (args.threads, args.sample, read_file, args.sample))
     cmds.append("samtools index %s.sorted.bam" % (args.sample,))
 
     # 4) trim the alignments to the primer start sites and normalise the coverage to save time
@@ -67,8 +71,8 @@ def run(parser, args):
         if os.path.exists("%s.hdf" % (args.sample)):
             os.remove("%s.hdf" % (args.sample))
         cmds.append("medaka consensus %s.primertrimmed.sorted.bam %s.hdf" % (args.sample, args.sample))
-        cmds.append("medaka snp %s %s.hdf %s.primertrimmed.medaka.vcf" % (ref, args.sample, args.sample))
-        cmds.append("margin_cons_medaka --depth 20 --quality 10 %s %s.primertrimmed.medaka.vcf %s.primertrimmed.sorted.bam > %s.consensus.fasta 2> %s.report.txt" % (ref, args.sample, args.sample, args.sample, args.sample))
+        cmds.append("medaka snp reference.fa %s.hdf %s.primertrimmed.medaka.vcf" % (args.sample, args.sample))
+        cmds.append("margin_cons_medaka --depth 20 --quality 10 %s.reference.fa %s.primertrimmed.medaka.vcf %s.primertrimmed.sorted.bam > %s.consensus.fasta 2> %s.report.txt" % (args.sample, args.sample, args.sample, args.sample, args.sample))
     else:
         if not args.skip_nanopolish:
             if args.nanopolish_read_file:
@@ -76,8 +80,8 @@ def run(parser, args):
             else:
                     indexed_nanopolish_file = read_file
 
-            cmds.append("nanopolish variants --min-flanking-sequence 10 --fix-homopolymers -x %s --progress -t %s --reads %s -o %s.vcf -b %s.trimmed.sorted.bam -g %s -w \"%s\"  --snps --ploidy 1 -m 0.1" % (args.max_haplotypes, args.threads, indexed_nanopolish_file, args.sample, args.sample, ref, nanopolish_header))
-            cmds.append("nanopolish variants --fix-homopolymers -x %s --progress -t %s --reads %s -o %s.primertrimmed.vcf -b %s.primertrimmed.sorted.bam -g %s -w \"%s\" --snps --ploidy 1 -m 0.1" % (args.max_haplotypes, args.threads, indexed_nanopolish_file, args.sample, args.sample, ref, nanopolish_header))
+            cmds.append("nanopolish variants --min-flanking-sequence 10 --fix-homopolymers -x %s --progress -t %s --reads %s -o %s.vcf -b %s.trimmed.sorted.bam -g %s.reference.fa -w \"%s\" --snps --ploidy 1 -m 0.1" % (args.max_haplotypes, args.threads, indexed_nanopolish_file, args.sample, args.sample, args.sample, nanopolish_header))
+            cmds.append("nanopolish variants --fix-homopolymers -x %s --progress -t %s --reads %s -o %s.primertrimmed.vcf -b %s.primertrimmed.sorted.bam -g %s.reference.fa -w \"%s\" --snps --ploidy 1 -m 0.1" % (args.max_haplotypes, args.threads, indexed_nanopolish_file, args.sample, args.sample, args.sample, nanopolish_header))
 
             #python nanopore-scripts/expand-cigar.py --bam "$sample".primertrimmed.sorted.bam --fasta $ref | python nanopore-scripts/count-errors.py /dev/stdin > "$sample".errors.txt
 
@@ -91,7 +95,7 @@ def run(parser, args):
             # here we use the vcf file without primer binding site trimming (to keep nanopolish happy with flanks)
             # but we use the primertrimmed sorted bam file in order that primer binding sites do not count
             # for the depth calculation to determine any low coverage sites that need masking
-            cmds.append("margin_cons %s %s.vcf %s.primertrimmed.sorted.bam a > %s.consensus.fasta" % (ref, args.sample, args.sample, args.sample))
+            cmds.append("margin_cons %s.reference.fa %s.vcf %s.primertrimmed.sorted.bam a > %s.consensus.fasta" % (args.sample, args.sample, args.sample, args.sample))
 
     for cmd in cmds:
         print(colored.green("Running: ") + cmd, file=sys.stderr)
